@@ -1,0 +1,147 @@
+---
+title: "Quantification of Stranded RNA-Seq Library"
+author: "micah gearhart"
+date: "11/6/2017"
+output:
+  md_document:
+    variant: markdown_github
+editor_options:
+  chunk_output_type: console
+---
+
+```{r libraries,eval=T,results='hide',message=FALSE,warning=FALSE}
+library("Rsamtools")
+library("GenomicAlignments")
+library("GenomicFeatures")
+library("GenomeInfoDb")
+library("BiocParallel")
+library("DESeq2")
+library("stringr")
+library("rtracklayer")
+library("Rsubread")
+library("magrittr")
+library("TxDb.Celegans.UCSC.ce11.ensGene")
+
+(ts<-Sys.getenv("DATE"))
+ts<-format(Sys.time(), "%a_%b_%d_%Y_%H%M")
+
+qfilter<-0
+(nthread<-as.numeric(Sys.getenv("SLURM_NTASKS")))
+nthread<-2
+wd<-Sys.getenv("wd")
+#wd<-getwd()
+alias_data<-read.table("/projects/standard/gearh006/shared/GENOMES/ce11.chromAlias.txt")
+
+#.libPaths(c("/home/gearh006/gearh006/R/x86_64-pc-linux-gnu-library/4.4",
+#"/common/software/install/manual/R/4.4.0-openblas-rocky8-fix/lib64/R/library"))
+```
+
+```{r bam2bw,eval=T}
+a1<-alias_data$V1
+names(a1)<-alias_data$V1
+a2<-alias_data$V1
+names(a2)<-alias_data$V2
+a3<-alias_data$V1
+names(a3)<-alias_data$V3
+a4<-alias_data$V1
+names(a4)<-alias_data$V4
+ax<-c(a1,a2,a3,a4)
+
+bam2bw<-function(i,qfilter=0) {
+bam_file<-fls[i]
+#size<-colData(cds)[match(bam_file %>% gsub("/","\\.",.) %>% gsub("-","\\.",.),colData(cds)$filename %>% gsub("\\.repair","",.)),"sizeFactor"]
+param_total <- ScanBamParam(what="mapq",flag = scanBamFlag(isUnmappedQuery = FALSE,isDuplicate = FALSE,isMinusStrand = NA,isMateMinusStrand = NA,isProperPair = FALSE))
+size<-countBam(bam_file,param=param_total)$records/1e6
+print(size)
+bigwig_file<-paste0(strsplit(basename(bam_file) %>% gsub("_trimmed.bam","",.),"\\.")[[1]][1],"_",ts,".bigWig")
+temp<-readGAlignments(bam_file,param=param_total)
+#seqlevelsStyle(temp.cov)<-"UCSC" # not official UCSC names for galGal6
+#a<-alias_data[alias_data$V1 %in% seqlevels(temp),]
+#temp_alias<-a$V2
+#names(temp_alias)<-a$V1
+temp<-renameSeqlevels(temp,ax[names(ax) %in% seqlevels(temp)])
+temp.cov<-coverage(temp[mcols(temp)$mapq >= qfilter],weight=1/size)
+rtracklayer::export(temp.cov,bigwig_file)
+}
+```
+
+
+```{r bam2bw2,eval=T}
+#(fls<-list.files(paste0(wd,"/GRCh38"),".bam$",full.names=T) %>%  str_subset("noMT.dedup.unique.bam",negate=T) )
+#names(fls)<-basename(fls) %>% gsub(".bam","",.)
+#countBam(fls)
+
+
+(fls<-list.files("/scratch.global/gearh006/greenste/WBcel235/",".bam$",full.names=T)  )
+names(fls)<-basename(fls) %>% gsub("_trimmed.bam","",.)
+
+bam2bw(1)
+
+#countBam(fls)
+#bplapply(fls, countBam,BPPARAM = MulticoreParam(workers=2))
+
+#unfiltered
+bplapply(seq(along=fls), bam2bw, qfilter=0,  BPPARAM = MulticoreParam(workers=2))
+
+#filtered
+#bplapply(seq(along=fls), bam2bw, qfilter=qfilter,  BPPARAM = MulticoreParam(workers=nthread))
+
+```
+
+```{r}
+txdb<-TxDb.Celegans.UCSC.ce11.ensGene
+exons <- exonsBy(txdb, by = "tx",use.names=TRUE)
+mcols(exons)$type <- "exon"
+mcols(exons)$source <- "TxDb.Celegans.UCSC.ce11.ensGene" 
+
+
+
+x<-unlist(exons)
+x2<-reduce(x[grep("C12C8.3",(names(x)))])
+
+x2d<-as.data.frame(x2)[,c("seqnames","start","end","strand")]
+x2d<-tibble::rownames_to_column(x2d)
+colnames(x2d)<-c("GeneID","Chr","Start","End","Strand")
+
+exons_gr<-reduce(unlist(exons))
+exons_gr$wls<-paste0(seqnames(exons_gr),":",start(exons_gr),"-",end(exons_gr))
+exons_df<-as.data.frame(exons_gr)[,c("wls","seqnames","start","end","strand")]
+colnames(exons_df)<-c("GeneID","Chr","Start","End","Strand")
+head(exons_df)
+dim(exons_df)
+```
+
+
+```{r featureCounts,eval=T}
+
+qfilter<-4
+
+
+
+stranded_counts<-featureCounts(fls,
+                 annot.ext = x2d,
+                 isGTFAnnotationFile=FALSE,
+                 strandSpecific=1,
+                 nthreads=2,
+                 minMQS=0,
+                 isPairedEnd=FALSE,
+                 checkFragLength=FALSE,
+                 requireBothEndsMapped=FALSE,
+                 )
+
+all_exons_counts_0<-featureCounts(fls,
+                 annot.ext = exons_df,
+                 isGTFAnnotationFile=FALSE,
+                 strandSpecific=0,
+                 nthreads=2,
+                 minMQS=0,
+                 isPairedEnd=FALSE,
+                 checkFragLength=FALSE,
+                 requireBothEndsMapped=FALSE,
+                 )
+
+save(fls,stranded_counts,all_exons_counts,all_exons_counts_0,file=paste0("aeschimann_lin41_counts_0_q",qfilter,"_",ts,".rdata"))
+
+```
+
+
