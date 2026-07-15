@@ -20,7 +20,9 @@ library("stringr")
 library("rtracklayer")
 library("Rsubread")
 library("magrittr")
+library("Gviz")
 library("TxDb.Celegans.UCSC.ce11.ensGene")
+library("BSgenome.Celegans.UCSC.ce11")
 
 (ts<-Sys.getenv("DATE"))
 ts<-format(Sys.time(), "%a_%b_%d_%Y_%H%M")
@@ -78,7 +80,7 @@ names(fls)<-basename(fls) %>% gsub("_trimmed.bam","",.)
 bam2bw(1)
 
 #countBam(fls)
-#bplapply(fls, countBam,BPPARAM = MulticoreParam(workers=2))
+mapped_reads<-bplapply(fls, countBam,BPPARAM = MulticoreParam(workers=2))
 
 #unfiltered
 bplapply(seq(along=fls), bam2bw, qfilter=0,  BPPARAM = MulticoreParam(workers=2))
@@ -144,4 +146,187 @@ save(fls,stranded_counts,all_exons_counts,all_exons_counts_0,file=paste0("aeschi
 
 ```
 
+
+
+```{r}
+#load("aeschimann_lin41_counts_q0_Fri_Jun_26_2026_1207.rdata",verbose=T)
+load("aeschimann_lin41_counts_0_q0_Tue_Jun_30_2026_1548.rdata",verbose=T)
+
+
+df<-stranded_counts$counts
+head(df)
+lin41_counts<-colSums(df)
+df<-as.data.frame(t(df))
+
+df$lin41_row_sum<-lin41_counts
+#df$mapped_reads_1e6<-blah2$mapped_reads/1e6
+df$exon_counts_1e6<-round(colSums(all_exons_counts$counts)/1e6,3)
+
+
+rownames(df)<-gsub("_trimmed.bam","",rownames(df))
+
+
+dim(df_subset<-df[str_subset(rownames(df),"n2853|SRR") %>% str_subset("xe11",negate=T) %>% str_subset("n2_34hrs_SRR1041699|n2_18hrs_SRR1041688|n2_22hrs_SRR1041691|n2_22hrs_SRR1041691|n2_26hrs_SRR1041694",negate=T) ,])
+
+
+
+
+View(df_subset)
+
+
+
+write.csv(tibble::rownames_to_column(df_subset,var="Sample Name"),"Hendriks_Aeschimann_Raw_Counts_For_Lin41_subset.csv",quote=F,row.names=F)
+
+
+```
+
+```{r}
+bam2bw<-function(i,qfilter=0) {
+bam_file<-fls[i]
+#size<-colData(cds)[match(bam_file %>% gsub("/","\\.",.) %>% gsub("-","\\.",.),colData(cds)$filename %>% gsub("\\.repair","",.)),"sizeFactor"]
+param_total <- ScanBamParam(what="mapq",flag = scanBamFlag(isUnmappedQuery = FALSE,isDuplicate = FALSE,isMinusStrand = NA,isMateMinusStrand = NA,isProperPair = FALSE))
+#size<-countBam(bam_file,param=param_total)$records/1e6
+size <-lin41_counts[basename(bam_file)]/mean(df$lin41_row_sum)
+print(size)
+bigwig_file<-paste0(strsplit(basename(bam_file) %>% gsub("_trimmed.bam","",.),"\\.")[[1]][1],"_",ts,".bigWig")
+temp<-readGAlignments(bam_file,param=param_total)
+#seqlevelsStyle(temp.cov)<-"UCSC" # not official UCSC names for galGal6
+#a<-alias_data[alias_data$V1 %in% seqlevels(temp),]
+#temp_alias<-a$V2
+#names(temp_alias)<-a$V1
+temp<-renameSeqlevels(temp,ax[names(ax) %in% seqlevels(temp)])
+temp.cov<-coverage(temp[mcols(temp)$mapq >= qfilter],weight=1/size)
+rtracklayer::export(temp.cov,bigwig_file)
+}
+
+bplapply(seq(along=fls), bam2bw, qfilter=0,  BPPARAM = MulticoreParam(workers=2))
+```
+
+chrI:9,341,724-9,342,653
+
+chrI:9,334,259-9,344,020
+```{r}
+strack <- SequenceTrack(Celegans, chromosome = "chrI",name="DNA")
+axisTrack <- GenomeAxisTrack()
+grtrack <- GeneRegionTrack(TxDb.Celegans.UCSC.ce11.ensGene, genome = "ce11",
+                           chromosome = "chrI", name = "Gene Model")
+ylims<-c(0,50)
+  
+grtrack2<-GeneRegionTrack(x2,genome = "ce11",chromosome = "chrI", name = "Gene Model")
+
+dTrack_n20 <- DataTrack(range = "n2_18hrs_SRR1041687_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_18hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n21 <- DataTrack(range = "n2_20hrs_SRR1041689_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_20hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n22 <- DataTrack(range = "n2_22hrs_SRR1041690_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_22hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n23 <- DataTrack(range = "n2_24hrs_SRR1041692_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_24hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n24 <- DataTrack(range = "n2_26hrs_SRR1041693_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_26hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n25 <- DataTrack(range = "n2_28hrs_SRR1041695_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_28hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n26 <- DataTrack(range = "n2_30hrs_SRR1041696_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_30hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n27 <- DataTrack(range = "n2_32hrs_SRR1041697_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_32hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n28 <- DataTrack(range = "n2_34hrs_SRR1041698_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_34hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n29 <- DataTrack(range = "n2_36hrs_SRR1041700_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_36hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+
+
+dTrack0 <- DataTrack(range = "let_7_n2853_18hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_18hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack1 <- DataTrack(range = "let_7_n2853_20hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_20hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack2 <- DataTrack(range = "let_7_n2853_22hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_22hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack3 <- DataTrack(range = "let_7_n2853_24hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_24hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack4 <- DataTrack(range = "let_7_n2853_26hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_26hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack5 <- DataTrack(range = "let_7_n2853_28hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_28hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack6 <- DataTrack(range = "let_7_n2853_30hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_30hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack7 <- DataTrack(range = "let_7_n2853_32hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_32hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack8 <- DataTrack(range = "let_7_n2853_34hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_34hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack9 <- DataTrack(range = "let_7_n2853_36hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_36hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+
+plotTracks(list(axisTrack,dTrack8 ,grtrack2), from = 9341724, to = 9342653, cex = 0.8, reverseStrand = TRUE)
+
+ pdf("wide_n2.pdf",width=8.5,height =11)
+plotTracks(list(axisTrack,
+                dTrack_n20,dTrack_n21,dTrack_n22,dTrack_n23,dTrack_n24,dTrack_n25,dTrack_n26,dTrack_n27,dTrack_n28,dTrack_n29,grtrack2), main="N2",from = 9334259, to = 9344020, cex = 0.8, reverseStrand = TRUE)
+dev.off()
+
+pdf("wide_let7.pdf",width=8.5,height=11)
+
+plotTracks(list(axisTrack,dTrack0,dTrack1,dTrack2,dTrack3,dTrack4,dTrack5,dTrack6,dTrack7,dTrack8,dTrack9,grtrack2), main="let-7",from = 9334259, to = 9344020, cex = 0.8, reverseStrand = TRUE)
+dev.off()
+```
+
+
+```{r}
+ylims<-c(0,15)
+
+dTrack_n20 <- DataTrack(range = "n2_18hrs_SRR1041687_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_18hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n21 <- DataTrack(range = "n2_20hrs_SRR1041689_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_20hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n22 <- DataTrack(range = "n2_22hrs_SRR1041690_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_22hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n23 <- DataTrack(range = "n2_24hrs_SRR1041692_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_24hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n24 <- DataTrack(range = "n2_26hrs_SRR1041693_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_26hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n25 <- DataTrack(range = "n2_28hrs_SRR1041695_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_28hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n26 <- DataTrack(range = "n2_30hrs_SRR1041696_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_30hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n27 <- DataTrack(range = "n2_32hrs_SRR1041697_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_32hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n28 <- DataTrack(range = "n2_34hrs_SRR1041698_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_34hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+dTrack_n29 <- DataTrack(range = "n2_36hrs_SRR1041700_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "n2_36hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="black")
+
+
+dTrack0 <- DataTrack(range = "let_7_n2853_18hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_18hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack1 <- DataTrack(range = "let_7_n2853_20hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_20hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack2 <- DataTrack(range = "let_7_n2853_22hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_22hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack3 <- DataTrack(range = "let_7_n2853_24hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_24hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack4 <- DataTrack(range = "let_7_n2853_26hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_26hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack5 <- DataTrack(range = "let_7_n2853_28hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_28hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack6 <- DataTrack(range = "let_7_n2853_30hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_30hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack7 <- DataTrack(range = "let_7_n2853_32hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_32hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack8 <- DataTrack(range = "let_7_n2853_34hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_34hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+dTrack9 <- DataTrack(range = "let_7_n2853_36hrs_Fri_Jul_10_2026_1515.bigWig", genome = "ce11", type = "a", 
+                     chromosome = "chrI", name = "let7_36hrs",ylim=ylims,rotation.title=0,fontsize=24,fontcolor.title="darkgreen")
+
+
+pdf("narrow_n2.pdf",width=8.5,height =11)
+plotTracks(list(axisTrack,
+                dTrack_n20,dTrack_n21,dTrack_n22,dTrack_n23,dTrack_n24,dTrack_n25,dTrack_n26,dTrack_n27,dTrack_n28,dTrack_n29,grtrack2), main="N2",from = 9341724, to = 9342653, cex = 0.8, reverseStrand = TRUE)
+dev.off()
+
+pdf("narrow_let7.pdf",width=8.5,height=11)
+
+plotTracks(list(axisTrack,dTrack0,dTrack1,dTrack2,dTrack3,dTrack4,dTrack5,dTrack6,dTrack7,dTrack8,dTrack9,grtrack2), main="let-7",from = 9341724, to = 9342653, cex = 0.8, reverseStrand = TRUE)
+dev.off()
+
+```
 
